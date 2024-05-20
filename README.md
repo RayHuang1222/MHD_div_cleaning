@@ -1,2 +1,2 @@
 # MHDtest
-To be updated....
+Final term project for the Computational Astrophysics class in NTU. 
