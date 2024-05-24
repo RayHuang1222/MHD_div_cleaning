@@ -260,8 +260,8 @@ def HLL( L, R ):
     V2 = u*u + v*v + w*w
     a  = ( (gamma-1.0)*(H - 0.5*V2) )**0.5 
     
-    cR = ( gamma*P_L/L[0] )**0.5
-    cL = ( gamma*P_R/R[0] )**0.5
+    cL = ( gamma*P_L/L[0] )**0.5
+    cR = ( gamma*P_R/R[0] )**0.5
     
 #  compute maximum information propagation speed    
     bL = min( u-a, L[1]/(rhoL_sqrt)**2-cL )
