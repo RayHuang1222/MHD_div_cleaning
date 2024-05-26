@@ -1,13 +1,13 @@
 # MHD Divergence Cleaning
 Final term project for the Computational Astrophysics class in NTU. <br />
 
-### The following Riemann solvers have been implemented for hydrodynamics problems. <br />
+#### The following Riemann solvers have been implemented for hydrodynamics problems. <br />
 
  1.Roe Solver <br />
  2.HLL Solver <br />
  3.HLLC Solver <br />
 
-### The following Riemann solvers have been implemented for magnetohydroidynamics problems.
+#### The following Riemann solvers have been implemented for magnetohydroidynamics problems.
 
  1.HLL <br />
 
@@ -19,7 +19,7 @@ Final term project for the Computational Astrophysics class in NTU. <br />
 
 
 
-### References:
+#### References:
 
 [1] Brio, M. ; Wu, C. C. An Upwind Differencing Scheme for the Equations of Ideal Magnetohydrodynamics. Journal of Computational Physics, Volume 75, Issue 2, p. 400-422. <br />
 [2] Li, Shengtai. An HLLC Riemann solver for magneto-hydrodynamics. Journal of Computational Physics, Volume 203, Issue 1, p. 344-357. <br />
