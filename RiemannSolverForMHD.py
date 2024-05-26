@@ -1,3 +1,7 @@
+#--------------------------------------------------------------------
+# Test Brio and Wu problem with the MUSCL-Hancock scheme
+#--------------------------------------------------------------------
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -28,32 +32,32 @@ def InitialCondition( x ):
         P = 0.1  # gas pressure
         E = ( P ) /(gamma-1.0) + 0.5*d*(u**2.0+v**2+w**2) + 0.5*(bx**2+by**2+bz**2)     # total energy density
         
-#  conserved variables [0/1/2/3/4] <--> [density/momentum x/momentum y/momentum z/energy/B-field x/B-field y/B-field z]
-    return np.array( [d, d*u, d*v, d*w, E, bx, by, bz] )
+#  conserved variables [0/1/2/3/4] <--> [density/momentum x/momentum y/momentum z/energy/B-field x/B-field y/B-field z/psi]
+    return np.array( [d, d*u, d*v, d*w, E, bx, by, bz, 0.0] )
 
 # -------------------------------------------------------------------
 # define boundary condition by setting ghost zones
 # -------------------------------------------------------------------
 def BoundaryCondition( U ):
 #  outflow
-    U[0:nghost]   = U[nghost]
-    U[N-nghost:N] = U[N-nghost-1]
+    #U[0:nghost]   = U[nghost]
+    #U[N-nghost:N] = U[N-nghost-1]
 
 #  Dirichlet for Brio and Wu Shock Tube
-    #U[0:nghost]   = [1.0  , 0.0, 0.0, 0.0, 2.28125, 0.75, 1.0, 0.0]
-    #U[N-nghost:N] = [0.125, 0.0, 0.0, 0.0, 0.93125, 0.75, -1.0, 0.0]
+    U[0:nghost]   = [1.0  , 0.0, 0.0, 0.0, 2.28125, 0.75, 1.0, 0.0, 0.0]
+    U[N-nghost:N] = [0.125, 0.0, 0.0, 0.0, 0.93125, 0.75, -1.0, 0.0, 0.0]
 
 
 # -------------------------------------------------------------------
 # compute pressure
 # -------------------------------------------------------------------
-def ComputePressure( d, px, py, pz, e, bx, by, bz ):
+def ComputePressure( d, px, py, pz, e, bx, by, bz, psi ):
     B = (bx**2.0 + by**2.0 + bz**2.0)**0.5
     P = (gamma-1.0)*( e - 0.5*(px**2.0 + py**2.0 + pz**2.0)/d - 0.5*B**2.0 ) 
     assert np.all( P > 0 ), "negative pressure !!"
     return P
 
-def ComputeTotalPressure( d, px, py, pz, e, bx, by, bz ):
+def ComputeTotalPressure( d, px, py, pz, e, bx, by, bz, psi ):
     B = (bx**2.0 + by**2.0 + bz**2.0)**0.5
     P = (gamma-1.0)*( e - 0.5*(px**2.0 + py**2.0 + pz**2.0)/d - 0.5*B**2.0 ) + 0.5*B**2.0
     assert np.all( P > 0 ), "negative pressure !!"
@@ -63,7 +67,7 @@ def ComputeTotalPressure( d, px, py, pz, e, bx, by, bz ):
 # compute time-step by the CFL condition
 # -------------------------------------------------------------------
 def ComputeTimestep( U ):
-    P = ComputePressure( U[:,0], U[:,1], U[:,2], U[:,3], U[:,4], U[:,5], U[:,6], U[:,7] )
+    P = ComputePressure( U[:,0], U[:,1], U[:,2], U[:,3], U[:,4], U[:,5], U[:,6], U[:,7], U[:,8] )
     u = np.abs( U[:,1]/U[:,0] )
     v = np.abs( U[:,2]/U[:,0] )
     w = np.abs( U[:,3]/U[:,0] )
@@ -109,16 +113,17 @@ def ComputeLimitedSlope( L, C, R ):
 # convert conserved variables to primitive variables
 # -------------------------------------------------------------------
 def Conserved2Primitive( U ):
-    W = np.empty( 8 )
+    W = np.empty( 9 )
 
     W[0] = U[0]
     W[1] = U[1]/U[0]
     W[2] = U[2]/U[0]
     W[3] = U[3]/U[0]
-    W[4] = ComputePressure( U[0], U[1], U[2], U[3], U[4], U[5], U[6], U[7] )
+    W[4] = ComputePressure( U[0], U[1], U[2], U[3], U[4], U[5], U[6], U[7], U[8] )
     W[5] = U[5]
     W[6] = U[6]
     W[7] = U[7]
+    W[8] = U[8]
     
     return W
 
@@ -126,7 +131,7 @@ def Conserved2Primitive( U ):
 # convert primitive variables to conserved variables
 # -------------------------------------------------------------------
 def Primitive2Conserved( W ):
-    U = np.empty( 8 )
+    U = np.empty( 9 )
 
     U[0] = W[0]
     U[1] = W[0]*W[1]
@@ -137,6 +142,7 @@ def Primitive2Conserved( W ):
     U[5] = W[5]
     U[6] = W[6]
     U[7] = W[7]
+    U[8] = W[8]
 
     return U
 
@@ -146,9 +152,9 @@ def Primitive2Conserved( W ):
 def DataReconstruction_PLM( U ):
 
 #  allocate memory
-    W = np.empty( (N,8) )
-    L = np.empty( (N,8) )
-    R = np.empty( (N,8) )
+    W = np.empty( (N,9) )
+    L = np.empty( (N,9) )
+    R = np.empty( (N,9) )
 
 #  conserved variables --> primitive variables
     for j in range( N ):
@@ -181,9 +187,9 @@ def DataReconstruction_PLM( U ):
 # convert conserved variables to fluxes
 # -------------------------------------------------------------------
 def Conserved2Flux( U ):
-    flux = np.empty( 8 )
+    flux = np.empty( 9 )
 
-    P = ComputeTotalPressure( U[0], U[1], U[2], U[3], U[4], U[5] , U[6] , U[7]  )
+    P = ComputeTotalPressure( U[0], U[1], U[2], U[3], U[4], U[5], U[6], U[7], U[8] )
     u = U[1] / U[0]
     v = U[2] / U[0]
     w = U[3] / U[0]
@@ -196,6 +202,7 @@ def Conserved2Flux( U ):
     flux[5] = u*U[5] - u*U[5]
     flux[6] = u*U[6] - v*U[5]
     flux[7] = u*U[7] - w*U[5]
+    flux[8] = 0.0
     
     return flux
 
@@ -203,69 +210,69 @@ def Conserved2Flux( U ):
 # HLL Scheme
 # -------------------------------------------------------------------
 def HLL( L, R ):
-    
+
     rhoL_sqrt = L[0]**0.5
     rhoR_sqrt = R[0]**0.5
 
 #  compute the enthalpy of the left and right states: H = (E+P)/rho
-    P_Lg = ComputePressure( L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7] )
-    P_Rg = ComputePressure( R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7] )
-    P_L  = ComputeTotalPressure( L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7] )
-    P_R  = ComputeTotalPressure( R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7] )
-    
+    P_Lg = ComputePressure( L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8] )
+    P_Rg = ComputePressure( R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8] )
+    P_L  = ComputeTotalPressure( L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8] )
+    P_R  = ComputeTotalPressure( R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8] )
+
     H_L = ( L[4] + P_Lg )/L[0]
     H_R = ( R[4] + P_Rg )/R[0]
-    
-#  compute Roe-averaged values 
+
+#  compute Roe-averaged values
     H  = ( rhoL_sqrt*H_L  + rhoR_sqrt*H_R  ) / ( rhoL_sqrt + rhoR_sqrt )
     u  = ( L[1]/rhoL_sqrt + R[1]/rhoR_sqrt ) / ( rhoL_sqrt + rhoR_sqrt )
     v  = ( L[2]/rhoL_sqrt + R[2]/rhoR_sqrt ) / ( rhoL_sqrt + rhoR_sqrt )
     w  = ( L[3]/rhoL_sqrt + R[3]/rhoR_sqrt ) / ( rhoL_sqrt + rhoR_sqrt )
     rho = rhoL_sqrt*rhoR_sqrt
-    
+
     V2 = u*u + v*v + w*w
     p = rho*(H - 0.5*V2)*( ( gamma-1.0 ) / (gamma) )
     B = [( rhoL_sqrt*L[5] + rhoR_sqrt*R[5]  ) / ( rhoL_sqrt + rhoR_sqrt ),  \
          ( rhoL_sqrt*L[6] + rhoR_sqrt*R[6]  ) / ( rhoL_sqrt + rhoR_sqrt ),  \
          ( rhoL_sqrt*L[7] + rhoR_sqrt*R[7]  ) / ( rhoL_sqrt + rhoR_sqrt )]
 
-#  compute wave speeds 
+#  compute wave speeds
     a = ( gamma*p/rho )**0.5
     b = ( ( B[0]**2.0+B[1]**2.0+B[2]**2.0 ) / rho )**0.5
     bx = ( B[0]**2.0 / rho )**0.5
-    
+
     ca = ( B[0]**2.0 / rho)**0.5
     cf = (( a**2.0+b**2.0 + ( ( a**2.0+b**2.0 )**2.0 - 4*(a**2.0)*(bx**2.0) )**0.5 ) / 2.0 )**0.5
     cs = (( a**2.0+b**2.0 - ( ( a**2.0+b**2.0 )**2.0 - 4*(a**2.0)*(bx**2.0) )**0.5 ) / 2.0 )**0.5
-    
+
     aL = ( gamma*P_Lg/L[0] )**0.5
     bL = ( ( L[5]**2.0+L[6]**2.0+L[7]**2.0 ) / L[0] )**0.5
     bxL = ( L[5]**2.0 / L[0] )**0.5
     aR = ( gamma*P_Rg/R[0] )**0.5
     bR = ( ( R[5]**2.0+R[6]**2.0+R[7]**2.0 ) / R[0] )**0.5
     bxR = ( R[5]**2.0 / R[0] )**0.5
-    
+
     cL = (( aL**2+bL**2 + ( ( aL**2+bL**2 )**2 - 4*(aL**2)*(bxL**2) )**0.5 ) / 2 )**0.5
     cR = (( aR**2+bR**2 + ( ( aR**2+bR**2 )**2 - 4*(aR**2)*(bxR**2) )**0.5 ) / 2 )**0.5
-    
-#  compute maximum information propagation speed    
+
+#  compute maximum information propagation speed
     sL = min( u, u+ca, u+cf, u+cs, u-ca, u-cf, u-cs, L[1]/(rhoL_sqrt)**2 - cL )
     sR = max( u, u+ca, u+cf, u+cs, u-ca, u-cf, u-cs, R[1]/(rhoR_sqrt)**2 + cR )
 
     SR = max( sR, 0 )
     SL = min( sL, 0 )
- 
+
     flux_R = Conserved2Flux( R )
     flux_L = Conserved2Flux( L )
-    flux_HLL = ( SR*flux_L - SL*flux_R + SR*SL*( R-L ) ) / ( SR-SL )
 
+    flux_HLL = ( SR*flux_L - SL*flux_R + SR*SL*( R-L ) ) / ( SR-SL )
     if SL >= 0:
         flux = flux_L.copy()
     elif SL < 0 and SR > 0 :
         flux = flux_HLL.copy()
     else:
         flux - flux_R.copy()
-        
+
     return flux
 
 # -------------------------------------------------------------------
@@ -275,29 +282,35 @@ def init():
     line_d.set_xdata( x )
     line_u.set_xdata( x )
     line_v.set_xdata( x )
+    line_bx.set_xdata( x )
     line_by.set_xdata( x )
+    line_bz.set_xdata( x )
     line_p.set_xdata( x )
     return line_d, line_u, line_v, line_by, line_p
 
-def update( frame ): 
+def update( frame ):
     #  plot
     d  = U[nghost:N-nghost,0]
     u  = U[nghost:N-nghost,1] / U[nghost:N-nghost,0]
     v  = U[nghost:N-nghost,2] / U[nghost:N-nghost,0]
+    bx = U[nghost:N-nghost,5]
     by = U[nghost:N-nghost,6]
-    P  = ComputePressure( U[nghost:N-nghost,0], U[nghost:N-nghost,1], U[nghost:N-nghost,2], U[nghost:N-nghost,3], 
+    bz = U[nghost:N-nghost,7]
+    P  = ComputePressure( U[nghost:N-nghost,0], U[nghost:N-nghost,1], U[nghost:N-nghost,2], U[nghost:N-nghost,3],
                           U[nghost:N-nghost,4], U[nghost:N-nghost,5], U[nghost:N-nghost,6], U[nghost:N-nghost,7] )
     line_d.set_ydata( d )
     line_u.set_ydata( u )
     line_v.set_ydata( v )
+    line_bx.set_ydata( bx )
     line_by.set_ydata( by )
+    line_bz.set_ydata( bz )
     line_p.set_ydata( P )
 #  ax[0].legend( loc='upper right', fontsize=12 )
 #  ax[1].legend( loc='upper right', fontsize=12 )
 #  ax[2].legend( loc='upper right', fontsize=12 )
     ax[0].set_title( 't = %6.3f' % (t) )
 
-    return line_d, line_u, line_v, line_by, line_p
+    return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
 
 
 def update( frame ):
@@ -326,11 +339,10 @@ def update( frame ):
                 R[j]  -= dflux
 
 #        compute fluxes
-            flux = np.empty( (N,8) )
+            flux = np.empty( (N,9) )
             for j in range( nghost, N-nghost+1 ):
 #           R[j-1] is the LEFT state at the j+1/2 inteface
                 flux[j] = HLL( R[j-1], L[j]  )
-                #print(flux[j])
 
 #        update the volume-averaged input variables by dt
             U[nghost:N-nghost] -= dt/dx*( flux[nghost+1:N-nghost+1] - flux[nghost:N-nghost] )
@@ -344,31 +356,37 @@ def update( frame ):
     d  = U[nghost:N-nghost,0]
     u  = U[nghost:N-nghost,1] / U[nghost:N-nghost,0]
     v  = U[nghost:N-nghost,2] / U[nghost:N-nghost,0]
+    bx = U[nghost:N-nghost,5]
     by = U[nghost:N-nghost,6]
-    P  = ComputePressure( U[nghost:N-nghost,0], U[nghost:N-nghost,1], U[nghost:N-nghost,2], U[nghost:N-nghost,3], 
-                          U[nghost:N-nghost,4], U[nghost:N-nghost,5], U[nghost:N-nghost,6], U[nghost:N-nghost,7] )
+    bz = U[nghost:N-nghost,7]
+    P  = ComputePressure( U[nghost:N-nghost,0], U[nghost:N-nghost,1], U[nghost:N-nghost,2], U[nghost:N-nghost,3],
+                          U[nghost:N-nghost,4], U[nghost:N-nghost,5], U[nghost:N-nghost,6], U[nghost:N-nghost,7],
+                          U[nghost:N-nghost,8])
     line_d.set_ydata( d )
     line_u.set_ydata( u )
     line_v.set_ydata( v )
+    line_bx.set_ydata( bx )
     line_by.set_ydata( by )
+    line_bz.set_ydata( bz )
     line_p.set_ydata( P )
 #  ax[0].legend( loc='upper right', fontsize=12 )
 #  ax[1].legend( loc='upper right', fontsize=12 )
 #  ax[2].legend( loc='upper right', fontsize=12 )
     ax[0].set_title( 't = %6.3f' % (t) )
 
-    return line_d, line_u, line_v, line_by, line_p
+    return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
+
 
 #--------------------------------------------------------------------
 # parameters
 #--------------------------------------------------------------------
 # constants
 L        = 1.0       # 1-D computational domain size
-N_In     = 256       # number of computing cells
+N_In     = 400       # number of computing cells
 cfl      = 0.475       # Courant factor
 nghost   = 2         # number of ghost zones
 gamma    = 5.0/3.0   # ratio of specific heats
-end_time = 0.1      # simulation time
+end_time = 0.08      # simulation time
 
 # derived constants
 N  = N_In + 2*nghost    # total number of cells including ghost zones
@@ -384,7 +402,7 @@ nstep_per_image = 1     # plotting frequency
 # set initial condition
 t = 0.0
 x = np.empty( N_In )
-U = np.empty( (N,8 ) )
+U = np.empty( (N,9 ) )
 for j in range( N_In ):
     x[j] = (j+0.5)*dx    # cell-centered coordinates
     U[j+nghost] = InitialCondition( x[j] )
@@ -395,11 +413,11 @@ BoundaryCondition( U )
 fig, ax = plt.subplots( 5, 1, sharex=True, sharey=False, figsize=(8,12) )
 fig.subplots_adjust( hspace=0.15, wspace=0.0 )
 #fig.set_size_inches( 3.3, 12.8 )
-line_d_ref,  = ax[0].plot( r_ref, Rho_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-line_u_ref,  = ax[1].plot( r_ref, Vx_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-line_v_ref,  = ax[2].plot( r_ref, Vy_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-line_by_ref, = ax[3].plot( r_ref, By_ref, ls='--', markeredgecolor='r', markersize=0.5)
-line_p_ref,  = ax[4].plot( r_ref, Pres_ref, ls='--', markeredgecolor='r', markersize=0.5 )
+#line_d_ref,  = ax[0].plot( r_ref, Rho_ref, ls='--', markeredgecolor='r', markersize=0.5 )
+#line_u_ref,  = ax[1].plot( r_ref, Vx_ref, ls='--', markeredgecolor='r', markersize=0.5 )
+#line_v_ref,  = ax[2].plot( r_ref, Vy_ref, ls='--', markeredgecolor='r', markersize=0.5 )
+#line_by_ref, = ax[3].plot( r_ref, By_ref, ls='--', markeredgecolor='r', markersize=0.5)
+#line_p_ref,  = ax[4].plot( r_ref, Pres_ref, ls='--', markeredgecolor='r', markersize=0.5 )
 line_d,  = ax[0].plot( [], [], 'r-o', markeredgecolor='k', markersize=3 )
 line_u,  = ax[1].plot( [], [], 'b-o', markeredgecolor='k', markersize=3 )
 line_v,  = ax[2].plot( [], [], 'g-o', markeredgecolor='k', markersize=3 )
