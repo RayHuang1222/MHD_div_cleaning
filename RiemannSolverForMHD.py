@@ -40,12 +40,12 @@ def InitialCondition( x ):
 # -------------------------------------------------------------------
 def BoundaryCondition( U ):
 #  outflow
-    #U[0:nghost]   = U[nghost]
-    #U[N-nghost:N] = U[N-nghost-1]
+    U[0:nghost]   = U[nghost]
+    U[N-nghost:N] = U[N-nghost-1]
 
 #  Dirichlet for Brio and Wu Shock Tube
-    U[0:nghost]   = [1.0  , 0.0, 0.0, 0.0, 2.28125, 0.75, 1.0, 0.0, 0.0]
-    U[N-nghost:N] = [0.125, 0.0, 0.0, 0.0, 0.93125, 0.75, -1.0, 0.0, 0.0]
+    #U[0:nghost]   = [1.0  , 0.0, 0.0, 0.0, 2.28125, 0.75, 1.0, 0.0, 0.0]
+    #U[N-nghost:N] = [0.125, 0.0, 0.0, 0.0, 0.93125, 0.75, -1.0, 0.0, 0.0]
 
 
 # -------------------------------------------------------------------
