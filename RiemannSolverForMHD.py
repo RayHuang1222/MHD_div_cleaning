@@ -196,7 +196,7 @@ def Conserved2Flux( U ):
     w = U[3] / U[0]
 
     flux[0] = U[1]
-    flux[1] = U[0]*u*u + P - 0*U[5]**2
+    flux[1] = U[0]*u*u + P - U[5]**2
     flux[2] = U[0]*u*v - U[5]*U[6] 
     flux[3] = U[0]*u*w - U[5]*U[7]
     flux[4] = (U[4] + P)*u - U[5]*np.dot([ U[5], U[6], U[7] ], [ u, v, w ] )
@@ -206,9 +206,6 @@ def Conserved2Flux( U ):
     flux[8] = 0.0
     
     return flux
-
-
-
 # -------------------------------------------------------------------
 # HLL Scheme
 # -------------------------------------------------------------------
@@ -274,9 +271,41 @@ def HLL( L, R ):
     elif SL < 0 and SR > 0 :
         flux = flux_HLL.copy()
     else:
-        flux - flux_R.copy()
+        flux = flux_R.copy()
 
     return flux
+
+# mixed GLM_method
+def mixed_secondstep(flux, L, R):
+    ch = 1.0
+    flux_mixed = flux.copy()
+    b_xm = L[5] + 0.5*( R[5] - L[5]) - ( R[8] - L[8] ) / ( 2*ch )
+    psi_m = L[8] + 0.5*( R[8] - L[8]) - ch*( R[5] - L[5] ) / 2  
+    flux_mixed[8] = flux[8] + ch**2*b_xm
+    flux_mixed[5] = flux[5] + psi_m
+
+    return flux_mixed
+
+def hyperbolic_secondstep(flux, L, R):
+    ch = 0.8       #目前只是亂設一個（0,1)的數字
+    flux_hyp = flux.copy()
+    b_xm = L[5] + 0.5*( R[5] - L[5]) - ( R[8] - L[8] ) / ( 2*ch )
+    psi_m = L[8] + 0.5*( R[8] - L[8]) - 0.5*ch*( R[5] - L[5] ) 
+    flux_hyp[8] = flux[8] + psi_m
+    flux_hyp[5] = flux[5] + ch**2*b_xm
+
+    return flux_hyp
+
+
+# compute divergence
+def ComputeDivergenceB(U, dx):
+    bx = U[:, 5]
+    by = U[:, 6]
+    bz = U[:, 7]
+    divB = np.zeros_like(bx)
+    divB[:-1] = (bx[1:] - bx[:-1]) / dx + (by[1:] - by[:-1]) / dx + (bz[1:] - bz[:-1]) / dx
+
+    return divB
 
 # -------------------------------------------------------------------
 # initialize animation
@@ -286,10 +315,10 @@ def init():
     line_u.set_xdata( x )
     line_v.set_xdata( x )
     line_bx.set_xdata( x )
-    line_by.set_xdata( x )
-    line_bz.set_xdata( x )
+    # line_by.set_xdata( x )
+    # line_bz.set_xdata( x )
     line_p.set_xdata( x )
-    return line_d, line_u, line_v, line_by, line_p, line_bx, line_bz
+    return line_d, line_u, line_v, line_bx, line_p
 
 def update( frame ):
     #  plot
@@ -312,8 +341,9 @@ def update( frame ):
 #  ax[1].legend( loc='upper right', fontsize=12 )
 #  ax[2].legend( loc='upper right', fontsize=12 )
     ax[0].set_title( 't = %6.3f' % (t) )
-
+    
     return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
+    # return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
 
 
 def update( frame ):
@@ -328,6 +358,7 @@ def update( frame ):
 
 #        estimate time-step from the CFL condition
             dt = ComputeTimestep( U )
+            # c_p = np.sqrt(-dt*c_h**2/np.ln(c_d))
             print( "t = %13.7e --> %13.7e, dt = %13.7e" % (t,t+dt,dt) )
 
 #        data reconstruction
@@ -345,16 +376,38 @@ def update( frame ):
             flux = np.empty( (N,9) )
             for j in range( nghost, N-nghost+1 ):
 #           R[j-1] is the LEFT state at the j+1/2 inteface
-                flux[j] = HLL( R[j-1], L[j]  )
+#           first use HLL solver 
+                flux[j] = HLL(R[j-1], L[j])
 
-#        update the volume-averaged input variables by dt
+#           1.mixed correction
+                flux[j] = mixed_secondstep(flux[j], R[j-1] ,L[j])
+
+#           2.hyperbolic correction
+#                flux[j] = hyperbolic_secondstep(flux[j], R[j-1] ,L[j])
+                
+#           update the volume-averaged input variables by dt
             U[nghost:N-nghost] -= dt/dx*( flux[nghost+1:N-nghost+1] - flux[nghost:N-nghost] )
+            
+            
+#           update the psi for 1.mixed  (hyperbolic dont need)
+            U[8] = c_d*U[8]
 
-#        update time
+#           update time
             t = t + dt
+#           Compute and store divergence of B
+            divB = ComputeDivergenceB(U, dx)
+            print("Sum divergence of B at",t,"is",np.sum((divB)))
             if ( t >= end_time ):
                 anim.event_source.stop()
                 break
+
+        # Compute divergence of B
+        divB = ComputeDivergenceB(U, dx)
+        time_values.append(t)
+        divB_values.append(np.abs(sum(divB)))
+        print("Sum divergence of B at t = %f is %f" % (t, np.sum(divB)))
+            
+            
     #  plot
     d  = U[nghost:N-nghost,0]
     u  = U[nghost:N-nghost,1] / U[nghost:N-nghost,0]
@@ -369,15 +422,15 @@ def update( frame ):
     line_u.set_ydata( u )
     line_v.set_ydata( v )
     line_bx.set_ydata( bx )
-    line_by.set_ydata( by )
-    line_bz.set_ydata( bz )
+    # line_by.set_ydata( by )
+    # line_bz.set_ydata( bz )
     line_p.set_ydata( P )
 #  ax[0].legend( loc='upper right', fontsize=12 )
 #  ax[1].legend( loc='upper right', fontsize=12 )
 #  ax[2].legend( loc='upper right', fontsize=12 )
     ax[0].set_title( 't = %6.3f' % (t) )
-
     return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
+#    return line_d, line_u, line_v, line_bx, line_p
 
 
 #--------------------------------------------------------------------
@@ -385,11 +438,17 @@ def update( frame ):
 #--------------------------------------------------------------------
 # constants
 L        = 1.0       # 1-D computational domain size
-N_In     = 400       # number of computing cells
+N_In     = 200       # number of computing cells
 cfl      = 0.475       # Courant factor
 nghost   = 2         # number of ghost zones
 gamma    = 5.0/3.0   # ratio of specific heats
-end_time = 0.08      # simulation time
+end_time = 0.1      # simulation time
+c_h = cfl
+c_d = 0.5 #0~1
+time_values = []
+divB_values = []
+
+
 
 # derived constants
 N  = N_In + 2*nghost    # total number of cells including ghost zones
@@ -397,6 +456,17 @@ dx = L/N_In             # spatial resolution
 
 # plotting parameters
 nstep_per_image = 1     # plotting frequency
+
+## Load analytical solution (strong_shock, depend on your path)
+data_strong_shock = np.loadtxt("/Users/jameswu/Desktop/計算天文物理/final/BrioWu.txt") 
+x_analytical = data_strong_shock[:,0]
+d_analytical = data_strong_shock[:,1]   
+u_analytical = data_strong_shock[:,2]   
+v_analytical = data_strong_shock[:,3]   
+bx_analytical = data_strong_shock[:,5]  
+by_analytical = data_strong_shock[:,6]  
+bz_analytical = data_strong_shock[:,7]  
+P_analytical = data_strong_shock[:,8]  
 
 
 #--------------------------------------------------------------------
@@ -445,8 +515,35 @@ ax[4].set_ylim( -1.5, 1.5 )
 ax[5].set_ylim( -1.5, 1.5 )
 ax[6].set_ylim( 0.0, 2.5)
 
+# Plot analytical solution
+ax[0].plot(x_analytical, d_analytical, 'k-', lw=1.5, label='Analytical')
+ax[1].plot(x_analytical, u_analytical, 'k-', lw=1.5, label='Analytical')    
+ax[2].plot(x_analytical, v_analytical, 'k-', lw=1.5, label='Analytical')
+ax[3].plot(x_analytical, bx_analytical, 'k-', lw=1.5, label='Analytical')
+ax[4].plot(x_analytical, by_analytical, 'k-', lw=1.5, label='Analytical')
+ax[5].plot(x_analytical, bz_analytical, 'k-', lw=1.5, label='Analytical')
+ax[6].plot(x_analytical, P_analytical, 'k-', lw=1.5, label='Analytical')
+
+
 # create movie
 nframe = 99999999 # arbitrarily large
 anim   = animation.FuncAnimation( fig, func=update, init_func=init,
                                   frames=nframe, interval=200, repeat=False )
+plt.show()
+
+
+
+# To see whether the divergence B have decreased
+time_values = np.array(time_values)
+divB_values = np.array(divB_values)
+# print("time_values:", time_values)
+# print("divB_values:", divB_values)
+plt.figure(figsize=(10, 6))
+plt.plot(time_values, divB_values, marker='o', linestyle='-', color='b', label='divergence of B')
+plt.xlabel('Time t')
+plt.ylabel('Divergence of B')
+plt.title('Divergence of B vs Time')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
 plt.show()
