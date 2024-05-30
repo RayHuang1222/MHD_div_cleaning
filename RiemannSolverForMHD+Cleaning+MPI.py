@@ -431,7 +431,7 @@ def update( frame ):
             u[nghost:n-nghost] -= dt/dx*( flux[nghost+1:n-nghost+1] - flux[nghost:n-nghost] )
             
 #           update the psi for 1.mixed  (hyperbolic dont need)
-            u[8] = c_d*u[8]
+            u[:,8] = c_d*u[:,8]
 
 #           send boundary data            
             recv = np.empty((nghost,9))
