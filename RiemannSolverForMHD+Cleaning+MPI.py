@@ -10,7 +10,6 @@ from mpi4py import MPI
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank() # my rank
 nrank = comm.Get_size() # total number of processes
-assert nrank==2, "Only works for 2 processes for now"
 
 #--------------------------------------------------------------------
 # parameters
@@ -27,6 +26,8 @@ c_h = cfl
 c_d = 0.5 #0~1
 time_values = []
 divB_values = []
+assert N_In/nrank == int(N_In/nrank), "Please use a divisor of N_In"
+assert nrank%2 == 0 , "Please use an even number of processes"
 
 
 # derived constants
@@ -34,9 +35,6 @@ N  = N_In + 2*nghost    # total number of cells including ghost zones
 n  = n_In + 2*nghost    # total number of cells including ghost zones per process
 dx = L/N_In             # spatial resolution
 
-# mpi
-des = (rank+1)%2 #target rank
-src = (rank+1)%2 #source rank
 
 # plotting parameters
 nstep_per_image = 1     # plotting frequency
@@ -75,20 +73,8 @@ def InitialCondition( x ):
 # -------------------------------------------------------------------
 def BoundaryCondition( U, bd_r, bd_l ):
 #  outflow
-   if rank == 0:
-      U[0:nghost]   = U[nghost]
-      U[n-nghost:n] = bd_r
-   else:
-      U[0:nghost]   = bd_l
-      U[n-nghost:n] = U[n-nghost-1]
-
-#    U[0:nghost]   = U[nghost]
-#    U[N-nghost:N] = U[N-nghost-1]
-
-#  Dirichlet for Brio and Wu Shock Tube
-    #U[0:nghost]   = [1.0  , 0.0, 0.0, 0.0, 2.28125, 0.75, 1.0, 0.0, 0.0]
-    #U[N-nghost:N] = [0.125, 0.0, 0.0, 0.0, 0.93125, 0.75, -1.0, 0.0, 0.0]
-
+    U[0:nghost]   = bd_l
+    U[n-nghost:n] = bd_r
 
 # -------------------------------------------------------------------
 # compute pressure
@@ -124,19 +110,15 @@ def ComputeTimestep( U ):
 #  maximum information speed in 3D
     max_info_speed = np.amax( u + cf )
     dt_cfl         = cfl*dx/max_info_speed
-    tsend = np.array([dt_cfl])
-    trecv = np.zeros(1)
-    if rank == 0:
-        comm.Send(tsend, des, tag = 1000)
-        comm.Recv(trecv, src, tag = 1001)
-    else:
-        comm.Recv(trecv, src, tag = 1000)
-        comm.Send(tsend, des, tag = 1001)
-    dt_cfl2 = trecv[0]
-    dt_end = end_time-t
+    dt_end         = end_time-t
 
+    # mpi
+    dt_l = comm.gather(dt_cfl, root = 0)
+    DT = comm.bcast(dt_l, root = 0)
+    DT.append(dt_end)
+    dt = min(DT)
 
-    return  min( dt_cfl, dt_cfl2, dt_end )
+    return  dt
 
 
 # -------------------------------------------------------------------
@@ -310,9 +292,17 @@ def HLL( L, R ):
 #  compute maximum information propagation speed
     sL = min( u, u+ca, u+cf, u+cs, u-ca, u-cf, u-cs, L[1]/(rhoL_sqrt)**2 - cL )
     sR = max( u, u+ca, u+cf, u+cs, u-ca, u-cf, u-cs, R[1]/(rhoR_sqrt)**2 + cR )
+    
+    # mpi
+    sL_l = comm.gather(sL, root = 0)
+    sR_l = comm.gather(sR, root = 0)
+    Sl = comm.bcast(sL_l, root = 0)
+    Sr = comm.bcast(sR_l, root = 0)
+    Sl.append(0)
+    Sr.append(0)
 
-    SR = max( sR, 0 )
-    SL = min( sL, 0 )
+    SR = max( Sr )
+    SL = min( Sl )
 
     flux_R = Conserved2Flux( R )
     flux_L = Conserved2Flux( L )
@@ -336,7 +326,6 @@ def mixed_secondstep(flux, L, R):
     psi_m = L[8] + 0.5*( R[8] - L[8]) - ch*( R[5] - L[5] ) / 2  
     flux_mixed[8] = flux[8] + ch**2*b_xm
     flux_mixed[5] = flux[5] + psi_m
-#    print(rank,flux[5],psi_m)
 
     return flux_mixed
 
@@ -369,8 +358,8 @@ def init():
     line_u.set_xdata( x )
     line_v.set_xdata( x )
     line_bx.set_xdata( x )
-    # line_by.set_xdata( x )
-    # line_bz.set_xdata( x )
+    line_by.set_xdata( x )
+    line_bz.set_xdata( x )
     line_p.set_xdata( x )
     return line_d, line_u, line_v, line_bx, line_p
 
@@ -380,14 +369,11 @@ def update( frame ):
 
     # split the cells into two halfs
     u = np.empty((n,9))
-    if rank == 0:
-        u = U[:n]
-        u[0:nghost] = U[nghost]
-    else:
-        u = U[-n:]
-        u[n-nghost:n] = U[n-nghost-1]
-    bd_r = u[n-nghost:n]
+    U[0:nghost] = U[nghost]
+    U[N-nghost:N] = U[N-nghost-1]
+    u = U[rank*n_In:(rank+1)*n_In+4]
     bd_l = u[0:nghost]
+    bd_r = u[n-nghost:n]
     it = 0
 
 #  for frame==0, just plot the initial condition
@@ -401,7 +387,8 @@ def update( frame ):
 #        estimate time-step from the CFL condition
             dt = ComputeTimestep( u )
             # c_p = np.sqrt(-dt*c_h**2/np.ln(c_d))
-            print( "t = %13.7e --> %13.7e, dt = %13.7e" % (t,t+dt,dt) )
+            if rank == 0:
+                print( "t = %13.7e --> %13.7e, dt = %13.7e" % (t,t+dt,dt) )
 
 #        data reconstruction
             L, R = DataReconstruction_PLM( u )
@@ -434,17 +421,33 @@ def update( frame ):
             u[:,8] = c_d*u[:,8]
 
 #           send boundary data            
-            recv = np.empty((nghost,9))
-            if rank == 0:
-                send = u[n-nghost-nghost:n-nghost]
-                comm.Send(send, des, tag = it)
-                comm.Recv(recv, src, tag = it+1)
-                bd_r = recv
+            recv_l = np.empty((nghost,9))
+            recv_r = np.empty((nghost,9))
+            send_l = u[nghost:nghost+nghost]
+            send_r = u[n-nghost-nghost:n-nghost]
+            
+            if rank%2 == 0:
+                comm.Send(send_r, rank+1, tag = it+rank)
+                comm.Recv(recv_r, rank+1, tag = it+rank+1)
+                bd_r = recv_r
             else:
-                send = u[nghost:nghost+nghost]
-                comm.Recv(recv, src, tag = it)
-                comm.Send(send, des, tag = it+1)
-                bd_l = recv
+                comm.Recv(recv_l, rank-1, tag = it+rank-1)
+                comm.Send(send_l, rank-1, tag = it+rank)
+                bd_l = recv_l
+
+            if rank != 0 and rank != nrank-1:
+                if rank%2 == 0:
+                    comm.Send(send_l, rank-1, tag = it+rank)
+                    comm.Recv(recv_l, rank-1, tag = it+rank-1)
+                    bd_l = recv_l
+                else:
+                    comm.Recv(recv_r, rank+1, tag = it+rank+1)
+                    comm.Send(send_r, rank+1, tag = it+rank)
+                    bd_r = recv_r
+            elif rank == 0:
+                bd_l = u[0:nghost]
+            elif rank == nrank-1:
+                bd_r = u[n-nghost:n]
 
 #           update time
             t = t + dt
@@ -461,21 +464,12 @@ def update( frame ):
         divB_values.append(np.abs(sum(divB)))
 #        print("Sum divergence of B at t = %f is %f" % (t, np.sum(divB)))
 
-# combine data
-    Recv = np.empty((n_In,9))
-    if rank == 0:
-        Send = u[nghost:n-nghost]
-        comm.Send(Send, des, tag = 0)
-        comm.Recv(Recv, src, tag = 1)
-        U[nghost:int(N/2)] = u[nghost:n-nghost]
-        U[int(N/2):N-nghost] = Recv
-    else:
-        Send = u[nghost:n-nghost]
-        comm.Recv(Recv, src, tag = 0)
-        comm.Send(Send, des, tag = 1)
-        U[nghost:int(N/2)] = Recv
-        U[int(N/2):N-nghost] = u[nghost:n-nghost]
-            
+    # combine data
+    Send = list(u[nghost:n-nghost])
+    Recv = comm.gather(Send, root = 0)
+    Bcast = comm.bcast(Recv, root = 0)
+    Cells = np.array( np.concatenate( np.array(Bcast), axis = None ) ).reshape((N_In,9))
+    U[nghost:N-nghost] = Cells
             
     #  plot
     d  = U[nghost:N-nghost,0]
@@ -491,15 +485,11 @@ def update( frame ):
     line_u.set_ydata( u )
     line_v.set_ydata( v )
     line_bx.set_ydata( bx )
-    # line_by.set_ydata( by )
-    # line_bz.set_ydata( bz )
+    line_by.set_ydata( by )
+    line_bz.set_ydata( bz )
     line_p.set_ydata( P )
-#  ax[0].legend( loc='upper right', fontsize=12 )
-#  ax[1].legend( loc='upper right', fontsize=12 )
-#  ax[2].legend( loc='upper right', fontsize=12 )
     ax[0].set_title( 't = %6.3f' % (t) )
     return line_d, line_u, line_v, line_bx, line_by, line_bz, line_p
-#    return line_d, line_u, line_v, line_bx, line_p
 
 
 ## Load analytical solution (strong_shock, depend on your path)
@@ -524,18 +514,10 @@ U = np.empty( (N,9 ) )
 for j in range( N_In ):
     x[j] = (j+0.5)*dx    # cell-centered coordinates
     U[j+nghost] = InitialCondition( x[j] )
-    
-#BoundaryCondition( U )
 
 # create figure
 fig, ax = plt.subplots( 7, 1, sharex=True, sharey=False, figsize=(8,12) )
 fig.subplots_adjust( hspace=0.15, wspace=0.0 )
-#fig.set_size_inches( 3.3, 12.8 )
-#line_d_ref,  = ax[0].plot( r_ref, Rho_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-#line_u_ref,  = ax[1].plot( r_ref, Vx_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-#line_v_ref,  = ax[2].plot( r_ref, Vy_ref, ls='--', markeredgecolor='r', markersize=0.5 )
-#line_by_ref, = ax[3].plot( r_ref, By_ref, ls='--', markeredgecolor='r', markersize=0.5)
-#line_p_ref,  = ax[4].plot( r_ref, Pres_ref, ls='--', markeredgecolor='r', markersize=0.5 )
 line_d,  = ax[0].plot( [], [], 'r-o', markeredgecolor='k', markersize=3 )
 line_u,  = ax[1].plot( [], [], 'b-o', markeredgecolor='k', markersize=3 )
 line_v,  = ax[2].plot( [], [], 'g-o', markeredgecolor='k', markersize=3 )
