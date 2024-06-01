@@ -16,7 +16,7 @@ def InitialCondition( x ):
         u = 0.0  # velocity x
         v = 0.0
         w = 0.0
-        bx = 1.0
+        bx = 0.75
         by = 1.0
         bz = 0.0
         P = 1.0  # gas pressure
@@ -26,7 +26,7 @@ def InitialCondition( x ):
         u = 0.0  # velocity x
         v = 0.0
         w = 0.0
-        bx = 1.0
+        bx = 0.75
         by = -1.0
         bz = 0.0
         P = 0.1  # gas pressure
@@ -315,8 +315,8 @@ def init():
     line_u.set_xdata( x )
     line_v.set_xdata( x )
     line_bx.set_xdata( x )
-    # line_by.set_xdata( x )
-    # line_bz.set_xdata( x )
+    line_by.set_xdata( x )
+    line_bz.set_xdata( x )
     line_p.set_xdata( x )
     return line_d, line_u, line_v, line_bx, line_p
 
@@ -390,7 +390,7 @@ def update( frame ):
             
             
 #           update the psi for 1.mixed  (hyperbolic dont need)
-            U[8] = c_d*U[8]
+            U[:,8] = c_d*U[:,8]
 
 #           update time
             t = t + dt
@@ -400,7 +400,9 @@ def update( frame ):
             if ( t >= end_time ):
                 anim.event_source.stop()
                 break
+        
 
+        
         # Compute divergence of B
         divB = ComputeDivergenceB(U, dx)
         time_values.append(t)
@@ -422,8 +424,8 @@ def update( frame ):
     line_u.set_ydata( u )
     line_v.set_ydata( v )
     line_bx.set_ydata( bx )
-    # line_by.set_ydata( by )
-    # line_bz.set_ydata( bz )
+    line_by.set_ydata( by )
+    line_bz.set_ydata( bz )
     line_p.set_ydata( P )
 #  ax[0].legend( loc='upper right', fontsize=12 )
 #  ax[1].legend( loc='upper right', fontsize=12 )
@@ -442,7 +444,7 @@ N_In     = 200       # number of computing cells
 cfl      = 0.475       # Courant factor
 nghost   = 2         # number of ghost zones
 gamma    = 5.0/3.0   # ratio of specific heats
-end_time = 0.1      # simulation time
+end_time = 0.08      # simulation time
 c_h = cfl
 c_d = 0.5 #0~1
 time_values = []
